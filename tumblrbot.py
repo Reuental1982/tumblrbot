@@ -559,8 +559,8 @@ def bot(url_list,opt_proxy,random_mode,target_url,debug):
 	tot_images = 0
 	tot_errors = 0
 	imgskiped = 0
-	max_pages_per_blog = 3
-	max_images_per_page = 5
+	max_pages_per_blog = 99
+	max_images_per_page = 999999
 	sleep_time = 5
 	site_errors = []
 	# Database Connection Setup
@@ -618,8 +618,8 @@ def bot(url_list,opt_proxy,random_mode,target_url,debug):
 	dbconn_tumblr.close()
 	dbconn_smp.close()
 	elapsed_time = timer() - script_start
-	logr("I've done my job!")
-	bot_summary(tot_images,tot_errors,imgskiped,elapsed_time)
+	# logr("I've done my job!")
+	bot_summary('tumblrbot',tot_images,tot_errors,imgskiped,elapsed_time)
 
 
 if __name__ == '__main__':

@@ -9,9 +9,11 @@ from urlparse import urlparse
 import mechanize
 import argparse
 import re
+import json
 import time
 import datetime
 import MySQLdb
+# import get_image_hash
 from PIL import Image
 from cStringIO import StringIO
 from xtoolz import get_img_size , is_img_portrait , start_db, load_config, bot_summary, ensure_dir
@@ -44,7 +46,7 @@ def check_db_imageurl(url):
 	rows = pointer.fetchall()
 	return(rows)
 
-def check_db_imagehash(imghash):
+def check_imgdup(imghash):
 	pointer = dbconn_tumblr.cursor()
 	query = "SELECT * FROM images WHERE db_imghash = '%s'" % imghash
 	pointer.execute(query)
@@ -59,7 +61,7 @@ def check_db_page(url):
 	return(rows)
 
 
-def get_url_archives(url_master):
+def get_url_archives_old(url_master):
 	global site_errors
 	br = mechanize.Browser()
 	br.set_handle_robots(False)
@@ -70,6 +72,8 @@ def get_url_archives(url_master):
 				  'Janvier', 'Fevrier','mars', 'Avril','Mai','Juin','Juillet','Aout','Septembre','Octobre','Novembre','Decembre' \
 				  'Ocak', 'Subat', 'Mart', 'Nisan', 'Mayis', 'Harizan', 'Temmuz', 'Agustos', 'Eylul', 'Ekim', 'Kasim', 'Aralik']
 		for item in br.links():
+			print item
+			continue
 			if item.text in months:
 				parsed = urlparse(item.base_url)
 				url_parsed = parsed.scheme + '://' + parsed.netloc
@@ -80,6 +84,19 @@ def get_url_archives(url_master):
 		logr( 'Site %s not working properly' % url_master)
 	return(url_array)
 
+def get_url_archives(url_master):
+	global site_errors
+	url_array = []
+	parsed = urlparse(url_master)
+	url_parsed = parsed.scheme + '://' + parsed.netloc
+	soupfilter = SoupStrainer('nav' , {'class' : 'months'})
+	req = requests.get(url_master,headers=my_headers,timeout=my_timeout,proxies=my_proxies) 
+	soup = BeautifulSoup(req.text,'lxml',parse_only=soupfilter)
+	url_array = [url_parsed + url_path['href'] for url_path in soup.find_all('a')]
+	if len(url_array) == 0:
+		site_errors.append(url_master)
+		logr( 'Site %s not working properly' % url_master)
+	return(url_array)
 
 def goodmission(url):
 	req = requests.get(url,headers=my_headers,timeout=my_timeout,proxies=my_proxies) 
@@ -98,6 +115,19 @@ def goodmission(url):
 		res_url = 'error'
 		if debug_app : logr( 'error' )
 	return(res_url)
+
+def addicttosex(url):
+	req = requests.get(url,headers=my_headers,timeout=my_timeout,proxies=my_proxies) 
+	soupfilter = SoupStrainer("div",{"class" : "photo-wrapper-inner"})
+	soup = BeautifulSoup(req.text,"lxml",parse_only=soupfilter)
+	try:
+		res_url = soup.img['src']
+		if debug_app : logr( 'img link ' + res_url  )
+	except:
+		res_url = 'error'
+		if debug_app : logr( 'error' )
+	soup.decompose()
+	return(res_url) 
 
 def stilettocouture(url):
 	req = requests.get(url,headers=my_headers,timeout=my_timeout,proxies=my_proxies) 
@@ -163,19 +193,6 @@ def nicelegsandperspectives(url):
 	except:
 		res_url = 'error'
 		if debug_app : logr( 'error' )
-	return(res_url) 
-
-def addicttosex(url):
-	req = requests.get(url,headers=my_headers,timeout=my_timeout,proxies=my_proxies) 
-	soupfilter = SoupStrainer("div",{"class" : "photo-wrapper-inner"})
-	soup = BeautifulSoup(req.text,"lxml",parse_only=soupfilter)
-	try:
-		res_url = soup.img['src']
-		if debug_app : logr( 'img link ' + res_url  )
-	except:
-		res_url = 'error'
-		if debug_app : logr( 'error' )
-	soup.decompose()
 	return(res_url) 
 
 def sexyonheels(url):
@@ -393,6 +410,44 @@ def therubik(url):
 	soup.decompose()       
 	return(res_url)
 
+def heelsland(url):
+	req = requests.get(url,headers=my_headers,timeout=my_timeout,proxies=my_proxies)
+	# typical tumblr post - easy to grab pictures
+	soupfilter = SoupStrainer("div",{"class": "post load"})
+	soup = BeautifulSoup(req.text,"lxml",parse_only=soupfilter)
+	posts = [post['href'] for post in soup.find_all('a') if re.search('/image/',post['href'])]
+	if len(posts) > 0:
+		for post_url in posts : 
+			req = requests.get(post_url,headers=my_headers,timeout=my_timeout,proxies=my_proxies)
+			soup = BeautifulSoup(req.text,"lxml")
+			img_tags = soup.find_all("div" , {"id" : "content-wrapper"})
+			img_array = [img_url.img['data-src'] for img_url in img_tags]
+			if debug_app : 
+				for item in img_array:
+					logr( 'img link ' + item )
+			return(img_array)
+
+	soup = BeautifulSoup(req.text,"lxml")
+	# check if it's a photoset post
+	if len(soup.find_all("div",{"class": "html_photoset"})):
+		# this returns a javascript snippet which passes the img as parameters. this part parses the js code and extracts the urls.
+		img_tags = soup.find_all('script')
+		jscript_tag = str(img_tags[7]).split('\n')[-1].split('\t')[-1].strip('</script>')
+		json_data = json.loads(jscript_tag)
+		if debug_app : 
+			for item in json_data:
+				logr( 'img link ' + item )
+		return(json_data['image']['@list'])
+		# img_array = [img_url for img_url in json_data['image']['@list'] if re.match('^http://.+',img_url)]
+		# return(img_array)
+
+	#
+	# if other algorithms failed it defaults to download the first instance image
+	img_tag = soup.find("div", {"class": "photo"} )
+	if debug_app : logr( 'img link ' + img_tag.img['src'] )
+	return(img_tag.img['src'])
+
+
 def find_image_urls(page_url):
 	array_urls = []
 	htmlsource = requests.get(page_url,headers=my_headers,timeout=my_timeout,proxies=my_proxies) 
@@ -446,21 +501,32 @@ def find_image_urls(page_url):
 			img_link = mejeej(every_link)
 		elif url_parsed.netloc == 'stilettocouture.tumblr.com':
 			img_link = stilettocouture(every_link)            
-		elif url_parsed.netloc == 'goodmission.tumblr.com':
+		elif url_parsed.netloc == 'goodmission.tumblr.com' or url_parsed.netloc == 'tejano78.tumblr.com':
 			img_link = goodmission(every_link)
+		elif url_parsed.netloc == 'www.heels-land.com':
+			img_link = heelsland(every_link)
 		else:
 			logr( every_link )
 			img_link = 'error'
-		if img_link != 'error' and not re.match('^avatar_.+',img_link.split('/')[-1]) : 
-			array_urls.append(img_link)
+		# first check if the crawler return an array of link urls
+		if isinstance(img_link,list):
+			print 'array : %s' % str(img_link)
+			if img_link[0] != 'error' : array_urls.append(img_link)
+		else:
+			if not re.match('^avatar_.+', img_link.split('/')[-1]) and img_link != 'error': 
+				array_urls.append(img_link)
 	return array_urls
 
+def average_hash(img):
+	# not used 
+	return str(imagehash.average_hash(img))
+	
 def hashmem(im):
 	im = im.resize((8, 8), Image.ANTIALIAS).convert('L')
 	avg = reduce(lambda x, y: x + y, im.getdata()) / 64.
 	return reduce(lambda x, (y, z): x | (z << y),enumerate(map(lambda i: 0 if i < avg else 1, im.getdata())),0)
 
-def download_images(url,tumblrblog):  
+def download_images(url,tumblrblog):
 	global image_counter
 	global tot_images
 	global page_errors
@@ -485,7 +551,7 @@ def download_images(url,tumblrblog):
 		raw_conversion = StringIO(raw_content.content)
 		resource_image = Image.open(raw_conversion)
 		imghash = hashmem(resource_image)
-		rows_images = check_db_imagehash(imghash)
+		rows_images = check_imgdup(imghash)
 	except:
 		sys.stdout.write( ' hash error, image skipped\n' )
 		page_errors += 1
@@ -603,13 +669,18 @@ def bot(url_list,opt_proxy,random_mode,target_url,debug):
 			page_errors = 0
 			logr( 'Getting list of urls' )
 			list_image_links = find_image_urls(pagina)	
-			for image_link in list_image_links:
-				download_images(image_link,tumblrblog)
+			for this_img_link in list_image_links:
+				if isinstance(this_img_link,list):
+					for this_instance in this_img_link:
+						download_images(this_instance,tumblrblog)
+					page_counter += len(this_img_link)
+				else:
+					download_images(this_img_link,tumblrblog)
+					page_counter += 1
 				if image_counter > max_images_per_page:
 					break
 			if page_errors == 0:
 				rec_page(pagina)
-			page_counter += 1
 			time.sleep(sleep_time)
 			if page_counter > max_pages_per_blog:
 				page_counter -= 1
@@ -619,7 +690,7 @@ def bot(url_list,opt_proxy,random_mode,target_url,debug):
 	dbconn_smp.close()
 	elapsed_time = timer() - script_start
 	# logr("I've done my job!")
-	bot_summary('tumblrbot',tot_images,tot_errors,imgskiped,elapsed_time)
+	bot_summary('tumblrbot',tot_images,tot_errors,imgskiped,elapsed_time,url_list)
 
 
 if __name__ == '__main__':
@@ -627,7 +698,7 @@ if __name__ == '__main__':
 		parser.add_argument('-x' , '--proxy', nargs='?', const='dynamic' , default='none')
 		parser.add_argument('-d' , '--debug_app', action="store_true", help=("prints debug messages"))
 		parser.add_argument('-u' , '--url', nargs='?', const='dynamic' , default='none')
-		parser.add_argument('-f' , '--file' , nargs='?', const='dynamic' , default='./curated_urls')
+		parser.add_argument('-f' , '--file' , nargs='?', const='dynamic' , default='/root/xscripts/tumblrbot/urls')
 		parser.add_argument("-r", "--random", action="store_true", help=("randomizes  playlist"))
 		args = parser.parse_args()
 		if os.path.isfile(args.file) or re.match(r'^http://.+\.',args.url) :
